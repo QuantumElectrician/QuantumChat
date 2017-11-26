@@ -7,7 +7,35 @@
 		<key>Chat.xcscheme</key>
 		<dict>
 			<key>orderHint</key>
+			<integer>3</integer>
+		</dict>
+		<key>client.xcscheme</key>
+		<dict>
+			<key>orderHint</key>
 			<integer>0</integer>
+		</dict>
+		<key>client1.xcscheme</key>
+		<dict>
+			<key>orderHint</key>
+			<integer>2</integer>
+		</dict>
+		<key>server.xcscheme</key>
+		<dict>
+			<key>orderHint</key>
+			<integer>1</integer>
+		</dict>
+	</dict>
+	<key>SuppressBuildableAutocreation</key>
+	<dict>
+		<key>F4498D1B1FCA4A4300A22E4D</key>
+		<dict>
+			<key>primary</key>
+			<true/>
+		</dict>
+		<key>F4498D261FCA4A4E00A22E4D</key>
+		<dict>
+			<key>primary</key>
+			<true/>
 		</dict>
 	</dict>
 </dict>
