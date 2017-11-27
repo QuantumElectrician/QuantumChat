@@ -11,7 +11,7 @@
 
 typedef char* string;
 
-char* inputString();
+char* inputString(void);
 char* brkFind (char* input, int n);
 char* fromWordToEnd (char* input, int n);
 

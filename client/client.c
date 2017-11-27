@@ -20,11 +20,29 @@
 #include "parcer.h"
 
 void die(char*);
+void sendMessage(int);
 
 void die(char* msg)
 {
     printf("error: %s, %s\n", msg, strerror(errno));
     exit(1);
+}
+
+void sendMessage(int sockfd) {
+    char buff[100];
+    printf("Enter ur message:");
+    strcpy(buff, inputString());
+    if (send(sockfd, buff, 1 + strlen(buff), 0) < 0)
+    {
+        die("can't send username");
+    }
+    if (strcmp(buff, "exit") == 0)
+    {
+        printf("\nEXIT CODE\n");
+        usleep(1000);
+        close(sockfd);
+        exit(0);
+    }
 }
 
 int main(int argc, const char * argv[])
@@ -61,24 +79,11 @@ int main(int argc, const char * argv[])
     {
         die("can't send username");
     }
-    printf("sending username have done\n");
+    printf("Connected to server and sent ur username succesfully\n");
+    printf("Welcome to Chat!\n Use -help for list of commands\n");
     while (1)
     {
-        char buff[100];
-        printf("Enter ur message:");
-        //scanf("%s", buff);
-        strcpy(buff, inputString());
-        if (send(sockfd, buff, 1 + strlen(buff), 0) < 0)
-        {
-            die("can't send username");
-        }
-        if (strcmp(buff, "exit") == 0)
-        {
-            printf("\nEXIT CODE\n");
-            usleep(1000);
-            //close(sockfd);
-            return 0;
-        }
+        sendMessage(sockfd);
     }
     return 0;
 }

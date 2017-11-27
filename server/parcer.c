@@ -5,7 +5,7 @@
 
 #include "parcer.h"
 
-char* inputString() {
+char* inputString(void) {
     char buff[1024];
     for (int i = 0; i<1024; i++)
         buff[i] = 0;
