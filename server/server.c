@@ -6,6 +6,9 @@
 //  Copyright © 2017 Владислав Агафонов. All rights reserved.
 //
 
+//ipcrm -Q 125 ОЧИЩАЙ ИСТОРИЮ СООБЩЕНИЙ
+//sprintf(kostyl, "%s at %s : %s\n", mybuf.username, mybuf.currentTime, mybuf.message); сделать нормальную строку
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h> //sleep
@@ -27,7 +30,8 @@
 #define USERS_NUMBER 10
 #define LISTEN_PORT 5000
 #define THREADS_N 10
-#define HISTORY "History.txt"
+#define HISTORY_FILE "History.txt"
+#define HISTORY_N 200
 
 void die(char*);
 static void newRequest(int*);
@@ -55,11 +59,16 @@ typedef struct{
     int connectionSocket;
 }user_t;
 typedef struct{
-    char mess[100];
+    char usernameHis[50];
+    char between1[5];
+    char currentTimeHis[20];
+    char between2[5];
+    char messageHis[100];
+    char end[5];
 }message_t;
 typedef struct
 {
-    message_t history[200];
+    message_t history[HISTORY_N];
     statusesMessage status;
 }s_t;
 
@@ -82,7 +91,7 @@ void* createHistory(void* dummy)
     /* Cчетчик цикла и длина информативной части сообщения */
     long len;
     int maxlen;
-    char kostyl[170];
+    //char kostyl[170];
 
     /* Ниже следует пользовательская структура для сообщения */
     struct mymsgbuf{
@@ -109,9 +118,13 @@ void* createHistory(void* dummy)
             printf("Can\'t receive message from queue\n");
             exit(-1);
         }
-        sprintf(kostyl, "%s at %s : %s\n", mybuf.username, mybuf.currentTime, mybuf.message);
-        strcpy(historyVirt->history[historyPoint].mess, kostyl);
-        msync(&(historyVirt->history[historyPoint]), sizeof(message_t), MS_SYNC);
+        strcpy(historyVirt->history[historyPoint].usernameHis, mybuf.username);
+        strcpy(historyVirt->history[historyPoint].between1, " at ");
+        strcpy(historyVirt->history[historyPoint].currentTimeHis, mybuf.currentTime);
+        strcpy(historyVirt->history[historyPoint].between2, " : ");
+        strcpy(historyVirt->history[historyPoint].messageHis, mybuf.message);
+        strcpy(historyVirt->history[historyPoint].end, "\n");
+        msync(&(historyVirt->history[historyPoint]), sizeof(message_t), MS_SYNC); //принудительная синхронизация истории и виртуальной истории
         historyPoint++;
         
     }
@@ -258,10 +271,10 @@ static void newRequest(int* connfd)
 
 int main(int argc, const char * argv[])
 {
-    char sys[200];
-    sprintf(sys, "touch %s && rm %s", HISTORY, HISTORY);
+    char sys[100];
+    sprintf(sys, "touch %s && rm %s", HISTORY_FILE, HISTORY_FILE);
     system(sys); //удаление предыдущей истории истории
-    historyFD = open(HISTORY, O_RDWR | O_CREAT, 0666); //открытие файла с правами на чтение и запись и флагом на создание, если его нет
+    historyFD = open(HISTORY_FILE, O_RDWR | O_CREAT, 0666); //открытие файла с правами на чтение и запись и флагом на создание, если его нет
     ftruncate(historyFD, sizeof(s_t)); //зачистка файла с дескриптором history и вторым аргументом новый размер файла
     historyVirt = mmap(NULL, sizeof(s_t), PROT_WRITE | PROT_READ, MAP_SHARED, historyFD, 0);
     
@@ -277,11 +290,12 @@ int main(int argc, const char * argv[])
         exit(-1);
     }
     
-    //инициализация массива
+    //инициализация массивов
     for (int i = 0; i < USERS_NUMBER; i++)
     {
         users[i].status = EMPTY;
     }
+
     //создание слушающего сокета
     struct sockaddr_in serv_addr;
     if ((listenSocket = socket(AF_INET, SOCK_STREAM, 0)) < 0)
