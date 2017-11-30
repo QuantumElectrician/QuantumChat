@@ -12,6 +12,7 @@
 		F4498D2F1FCA4CAF00A22E4D /* parcer.c in Sources */ = {isa = PBXBuildFile; fileRef = F4498D2E1FCA4CAF00A22E4D /* parcer.c */; };
 		F4498D321FCA634A00A22E4D /* client.c in Sources */ = {isa = PBXBuildFile; fileRef = F4498D291FCA4A4E00A22E4D /* client.c */; };
 		F4498D351FCB6AA000A22E4D /* parcer.c in Sources */ = {isa = PBXBuildFile; fileRef = F4498D341FCB6AA000A22E4D /* parcer.c */; };
+		F4E587411FCEEECD00BAD1AF /* parcer.c in Sources */ = {isa = PBXBuildFile; fileRef = F4E5873F1FCEEECD00BAD1AF /* parcer.c */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -55,6 +56,8 @@
 		F4498D301FCA4CB500A22E4D /* parcer.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = parcer.h; sourceTree = "<group>"; };
 		F4498D331FCB6AA000A22E4D /* parcer.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = parcer.h; sourceTree = "<group>"; };
 		F4498D341FCB6AA000A22E4D /* parcer.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = parcer.c; sourceTree = "<group>"; };
+		F4E5873F1FCEEECD00BAD1AF /* parcer.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = parcer.c; sourceTree = "<group>"; };
+		F4E587401FCEEECD00BAD1AF /* parcer.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = parcer.h; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -106,6 +109,8 @@
 			isa = PBXGroup;
 			children = (
 				F4498D111FCA4A3100A22E4D /* main.c */,
+				F4E5873F1FCEEECD00BAD1AF /* parcer.c */,
+				F4E587401FCEEECD00BAD1AF /* parcer.h */,
 			);
 			path = Chat;
 			sourceTree = "<group>";
@@ -231,6 +236,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F4E587411FCEEECD00BAD1AF /* parcer.c in Sources */,
 				F4498D121FCA4A3100A22E4D /* main.c in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

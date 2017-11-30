@@ -19,8 +19,19 @@
 #include <pthread.h>
 #include "parcer.h"
 
+#define HISTORY_N 200
+
 void die(char*);
-void sendMessage(int);
+void connectToServer(int);
+void* updateHistory(void*);
+void printHistory(void);
+
+typedef struct{
+    char total[200];
+}message_t;
+
+message_t localHistory[HISTORY_N];
+int historyPoint = 0;
 
 void die(char* msg)
 {
@@ -28,20 +39,83 @@ void die(char* msg)
     exit(1);
 }
 
-void sendMessage(int sockfd) {
-    char buff[100];
-    printf("Enter ur message:");
-    strcpy(buff, inputString());
-    if (send(sockfd, buff, 1 + strlen(buff), 0) < 0)
+void printHistory()
+{
+    for (int i = 0; i < historyPoint; i++)
     {
-        die("can't send username");
+        printf("%s", localHistory[i].total);
     }
+}
+
+void* updateHistory(void* copy)
+{
+    int* connectSocket = (int*)copy;
+    char buff[200];
+    int i = 0;
+    while (1)
+    {
+        if ( (i = (int)recv(*connectSocket, buff, 200, MSG_PEEK) ) > 0)
+        {
+            if (strcmp(brkFind(buff, 1), "update") == 0)
+            {
+                recv(*connectSocket, buff, 200, 0);
+                //printf("NEW UPDATE ADDED TO HISTORY\n");
+                strcpy(localHistory[historyPoint].total, fromWordToEnd(buff, 1));
+                historyPoint++;
+                usleep(1000);
+            }
+        }
+    }
+}
+
+
+void connectToServer(int sockfd) {
+    char buff[100];
+    int flag = 1;
+    printf("Enter ur command:");
+    strcpy(buff, inputString());
+    if (strcmp(brkFind(buff, 1), "help") == 0)
+    {
+        printf("Available commands:\n help\n update\n history\n send\n exit\n");
+        flag = 0;
+    }
+    if (strcmp(brkFind(buff, 1), "update") == 0)
+    {
+        flag = 0;
+    }
+    if (strcmp(brkFind(buff, 1), "history") == 0)
+    {
+        printHistory();
+        flag = 0;
+    }
+    if (strcmp(brkFind(buff, 1), "send") == 0)
+    {
+        flag = 0;
+        printf("Enter ur message:");
+        strcpy(buff, inputString());
+        char buffToSend[100];
+        sprintf(buffToSend, "message %s", buff);
+        if (send(sockfd, buffToSend, 1 + strlen(buffToSend), 0) < 0)
+        {
+            die("can't send message");
+        }
+    }
+
     if (strcmp(buff, "exit") == 0)
     {
         printf("\nEXIT CODE\n");
-        usleep(1000);
+        if (send(sockfd, buff, 1 + strlen(buff), 0) < 0)
+        {
+            die("can't send message");
+        }
+        sleep(1);
         close(sockfd);
         exit(0);
+    }
+    
+    if (flag == 1)
+    {
+        printf("\nIncorrect entrance\n\nAvailable commands:\n help\n update\n history\n send\n exit\n");
     }
 }
 
@@ -79,11 +153,21 @@ int main(int argc, const char * argv[])
     {
         die("can't send username");
     }
+    
+    //создание треда для обновления локальной истории
+    pthread_t threadID;
+    int result;
+    result = pthread_create(&threadID, NULL, updateHistory, (void*)&sockfd);
+    if (result) {
+        printf("Can't create thread, returned value = %d\n", result);
+        exit(-1);
+    }
+    
     printf("Connected to server and sent ur username succesfully\n");
-    printf("Welcome to Chat!\n Use -help for list of commands\n");
+    printf("Welcome to Chat!\n Use 'help' for list of commands\n");
     while (1)
     {
-        sendMessage(sockfd);
+        connectToServer(sockfd);
     }
     return 0;
 }

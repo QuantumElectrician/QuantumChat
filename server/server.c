@@ -6,8 +6,8 @@
 //  Copyright © 2017 Владислав Агафонов. All rights reserved.
 //
 
-//ipcrm -Q 125 ОЧИЩАЙ ИСТОРИЮ СООБЩЕНИЙ
-//sprintf(kostyl, "%s at %s : %s\n", mybuf.username, mybuf.currentTime, mybuf.message); сделать нормальную строку
+//ipcrm -Q 125 ОЧИЩАЙ ОЧЕРЕДЬ СООБЩЕНИЙ
+//ipcrm -Q 126 ОЧИЩАЙ ОЧЕРЕДЬ СООБЩЕНИЙ
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -26,6 +26,7 @@
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <sys/msg.h>
+#include "parcer.h"
 
 #define USERS_NUMBER 10
 #define LISTEN_PORT 5000
@@ -35,27 +36,30 @@
 
 void die(char*);
 static void newRequest(int*);
-void addToUsers(char*);
+int addToUsers(char*);
 void connectionServer(int* , char*);
 char* getTime(void);
-void sendToServer(char* usernameToSend, char* currentTimeToSend, char* messageToSend);
-void* createHistory(void* dummy);
+void sendToHistoryServer(char* usernameToSend, char* currentTimeToSend, char* messageToSend);
+void* HistoryServer(void* dummy);
+void* SyncHistoryWithConnectionServers(void* dummy);
+void* sendUpdate(void* copy);
 
 
 typedef enum{
     EMPTY,
-    FIFTEENMINSAGO,
+    OFFLINE,
     ONLINE
 }statusesUser;
 typedef enum{
-    NEW,
-    READ
+    NOTHING,
+    READ,
+    NEW
 }statusesMessage;
 typedef struct{
     char username[20];
     int password;
     statusesUser status;
-    pthread_t worker;
+    pid_t connectionServer;
     int connectionSocket;
 }user_t;
 typedef struct{
@@ -65,11 +69,11 @@ typedef struct{
     char between2[5];
     char messageHis[100];
     char end[5];
+    statusesMessage status;
 }message_t;
 typedef struct
 {
     message_t history[HISTORY_N];
-    statusesMessage status;
 }s_t;
 
 int listenSocket;
@@ -80,7 +84,65 @@ int historyFD = 0;
 s_t* historyVirt; //создание указателя на пользовательскую структуру (область в оперативе)
 int historyPoint = 0;
 
-void* createHistory(void* dummy)
+void* SyncHistoryWithConnectionServers(void* dummy)
+{
+    /* IPC дескриптор для очереди сообщений */
+    int msqid;
+    
+    /* IPC ключ */
+    key_t key = 126;
+    
+    /* Cчетчик цикла и длина информативной части сообщения */
+    long len;
+    
+    /* Ниже следует пользовательская структура для сообщения */
+    struct mymsgbuf{
+        long mtype;
+        char username[50];
+        char currentTime[20];
+        char message[100];
+    } mybuf;
+    
+    /* Пытаемся получить доступ по ключу к очереди сообщений, если она существует,
+     или создать ее, если она еще не существует, с правами доступа
+     read & write для всех пользователей */
+    if((msqid = msgget(key, 0666 | IPC_CREAT)) < 0)
+    {
+        printf("Can\'t get msqid\n");
+        exit(-1);
+    }
+    
+    while (1)
+    {
+        for (int i = 0; i < HISTORY_N; i++)
+        {
+            if (historyVirt->history[i].status == NEW)
+            {
+                historyVirt->history[i].status = READ;
+                len = 170;
+                for (int j = 0; j < USERS_NUMBER; j++)
+                {
+                    //if ( (users[i].status == ONLINE) && (strcmp(users[i].username, historyVirt->history[i].usernameHis) != 0) )
+                    if (users[j].status == ONLINE)
+                    {
+                        mybuf.mtype = (int)users[j].connectionServer;
+                        strcpy(mybuf.username, historyVirt->history[i].usernameHis);
+                        strcpy(mybuf.message, historyVirt->history[i].messageHis);
+                        strcpy(mybuf.currentTime, historyVirt->history[i].currentTimeHis);
+                        /* Отсылаем сообщение. В случае ошибки сообщаем об этом */
+                        if (msgsnd(msqid, (struct mymsgbuf *) &mybuf, len, 0) < 0)
+                        {
+                            printf("Can\'t send message to queue\n");
+                            exit(-1);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+void* HistoryServer(void* dummy)
 {
     /* IPC дескриптор для очереди сообщений */
     int msqid;
@@ -118,31 +180,21 @@ void* createHistory(void* dummy)
             printf("Can\'t receive message from queue\n");
             exit(-1);
         }
+        char kostyl[100];
+        strcpy(kostyl, fromWordToEnd(mybuf.message, 1));
         strcpy(historyVirt->history[historyPoint].usernameHis, mybuf.username);
         strcpy(historyVirt->history[historyPoint].between1, " at ");
         strcpy(historyVirt->history[historyPoint].currentTimeHis, mybuf.currentTime);
         strcpy(historyVirt->history[historyPoint].between2, " : ");
-        strcpy(historyVirt->history[historyPoint].messageHis, mybuf.message);
+        strcpy(historyVirt->history[historyPoint].messageHis,kostyl);
         strcpy(historyVirt->history[historyPoint].end, "\n");
+        historyVirt->history[historyPoint].status = NEW;
         msync(&(historyVirt->history[historyPoint]), sizeof(message_t), MS_SYNC); //принудительная синхронизация истории и виртуальной истории
         historyPoint++;
-        
     }
 }
 
-char* getTime(void)
-{
-    time_t now;
-    struct tm *ptr;
-    static char tbuf[64];
-    bzero(tbuf,64);
-    time(&now);
-    ptr = localtime(&now);
-    strftime(tbuf,64, "%Y-%m-%e %H:%M:%S", ptr);
-    return tbuf;
-}
-
-void sendToServer(char* usernameToSend, char* currentTimeToSend, char* messageToSend)
+void sendToHistoryServer(char* usernameToSend, char* currentTimeToSend, char* messageToSend)
 {
     /* IPC дескриптор для очереди сообщений */
              int msqid;
@@ -185,33 +237,115 @@ void sendToServer(char* usernameToSend, char* currentTimeToSend, char* messageTo
     }
 }
 
+char* getTime(void)
+{
+    time_t now;
+    struct tm *ptr;
+    static char tbuf[64];
+    bzero(tbuf,64);
+    time(&now);
+    ptr = localtime(&now);
+    strftime(tbuf,64, "%Y-%m-%e %H:%M:%S", ptr);
+    return tbuf;
+}
+
+void* sendUpdate(void* copy)
+{
+    int* socket = (int*)copy;
+    int MyPID = (int)getpid();
+    /* IPC дескриптор для очереди сообщений */
+    int msqid;
+    long maxlen;
+    /* IPC ключ */
+    key_t key = 126;
+    
+    /* Cчетчик цикла и длина информативной части сообщения */
+    long len;
+    
+    /* Ниже следует пользовательская структура для сообщения */
+    struct mymsgbuf{
+        long mtype;
+        char username[50];
+        char currentTime[20];
+        char message[100];
+    } mybuf;
+    
+    /* Пытаемся получить доступ по ключу к очереди сообщений, если она существует,
+     или создать ее, если она еще не существует, с правами доступа
+     read & write для всех пользователей */
+    if((msqid = msgget(key, 0666 | IPC_CREAT)) < 0)
+    {
+        printf("Can\'t get msqid\n");
+        exit(-1);
+    }
+    
+    maxlen = 170;
+    while (1)
+    {
+        if ((len = msgrcv(msqid, (struct mymsgbuf *)&mybuf, maxlen, MyPID, 0)) < 0)
+        {
+            printf("Can\'t receive message from queue\n");
+            exit(-1);
+        }
+        
+        char kostyl[200];
+        sprintf(kostyl, "update %s at %s : %s\n", mybuf.username, mybuf.currentTime, mybuf.message);
+        if (send(*socket, kostyl, 1 + strlen(kostyl), 0) < 0)
+        {
+            die("can't send message");
+        }
+    }
+}
+
 void connectionServer(int* socket, char* username)
 {
+    //создание треда для создания истории
+    pthread_t threadIdUpdate;
+    int result;
+    result = pthread_create(&threadIdUpdate, NULL, sendUpdate, (void*)socket);
+    if (result) {
+        printf("Can't create thread, returned value = %d\n", result);
+        exit(-1);
+    }
     char buff[100];
     char currentTime[20];
-    recv(*socket, buff, 100, 0);
+    recv(*socket, buff, 100, MSG_PEEK);
     strcpy(currentTime, getTime());
     while (1)
     {
-        if (strcmp(buff, "exit") == 0)
+        if (strcmp(brkFind(buff, 1), "exit") == 0)
         {
             close(*socket);
+            for (int i = 0; i < USERS_NUMBER; i++)
+            {
+                if (strcmp(users[i].username, username) == 0)
+                {
+                    users[i].status = OFFLINE;
+                }
+            }
             exit(0);
         }
-        sendToServer(username, currentTime, buff);
-        recv(*socket, buff, 100, 0);
+        if (strcmp(brkFind(buff, 1), "message") == 0)
+        {
+            recv(*socket, buff, 100, 0);
+            sendToHistoryServer(username, currentTime, buff);
+        }
+        usleep(100);
+        recv(*socket, buff, 100, MSG_PEEK);
         strcpy(currentTime, getTime());
     }
 }
 
-void addToUsers(char* cp)
+int addToUsers(char* cp)
 {
     int flag = 1;
+    int index = 0;
     for (int i = 0; i < USERS_NUMBER; i++)
     {
         if (users[i].status == EMPTY)
         {
-            users[i].status = FIFTEENMINSAGO;
+            users[i].status = ONLINE;
+            index = i;
             sprintf(users[i].username, "%s", cp);
             printf("[SERVER] Added new user with username %s at %s\n", cp, getTime());
             flag = 0;
@@ -222,6 +356,7 @@ void addToUsers(char* cp)
     {
         die("users overflow");
     }
+    return index;
 }
 
 void die(char* msg)
@@ -234,6 +369,7 @@ static void newRequest(int* connfd)
 {
     char buff[100];
     int flag = 0;
+    int index = 0;
     printf("Waiting for the username ...\n");
     recv(*connfd, buff, 100, 0);
     printf("[SERVER] New request from %s\n\n", buff);
@@ -241,18 +377,20 @@ static void newRequest(int* connfd)
     {
         if (strcmp(users[i].username, buff)==0)
         {
+            users[i].status = ONLINE;
+            index = i;
             flag = 1;
             break;
         }
     }
     if (flag == 0)
     {
-        addToUsers(buff);
+        index = addToUsers(buff);
     }
     
     printf("Begin forking for creating new connect-Server...\n");
-    int pid = fork();
-    switch( pid )
+    pid_t pid = fork();
+    switch( (int)pid )
     {
         case 0:
             //дочерний процесс
@@ -264,7 +402,8 @@ static void newRequest(int* connfd)
             break;
         default:
             //родительский процесс
-            printf("Forcked\n");
+            users[index].connectionServer = pid;
+            printf("Forked\n");
             break;
     }
 }
@@ -274,17 +413,29 @@ int main(int argc, const char * argv[])
     char sys[100];
     sprintf(sys, "touch %s && rm %s", HISTORY_FILE, HISTORY_FILE);
     system(sys); //удаление предыдущей истории истории
+    sprintf(sys, "ipcrm -Q 125 && ipcrm -Q 126");
+    system(sys); //удаление старых очередей сообщений
     historyFD = open(HISTORY_FILE, O_RDWR | O_CREAT, 0666); //открытие файла с правами на чтение и запись и флагом на создание, если его нет
     ftruncate(historyFD, sizeof(s_t)); //зачистка файла с дескриптором history и вторым аргументом новый размер файла
     historyVirt = mmap(NULL, sizeof(s_t), PROT_WRITE | PROT_READ, MAP_SHARED, historyFD, 0);
     
     signal( SIGCHLD, SIG_IGN ); //отсутствие зомби
     
-    //создание треда для создания истории
-    pthread_t threadID;
+    //создание треда для поддержания истории
+    pthread_t threadIDHistory;
     int result;
-    result = pthread_create(&threadID, NULL, createHistory, NULL);
+    result = pthread_create(&threadIDHistory, NULL, HistoryServer, NULL);
     if (result)
+    {
+        printf("Can't create thread, returned value = %d\n", result);
+        exit(-1);
+    }
+    
+    //создание треда для синхронизации истории с серверами
+    pthread_t threadIDSync;
+    int res;
+    res = pthread_create(&threadIDSync, NULL, SyncHistoryWithConnectionServers, NULL);
+    if (res)
     {
         printf("Can't create thread, returned value = %d\n", result);
         exit(-1);
