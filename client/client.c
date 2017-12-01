@@ -25,6 +25,7 @@ void die(char*);
 void connectToServer(int);
 void* updateHistory(void*);
 void printHistory(void);
+int sendAll(int s, char *buf, int len, int flags);
 
 typedef struct{
     char total[200];
@@ -32,6 +33,34 @@ typedef struct{
 
 message_t localHistory[HISTORY_N];
 int historyPoint = 0;
+
+int sendAll(int s, char *buf, int len, int flags)
+{
+    int total = 0;
+    int n = 0;
+    
+    while(total < len)
+    {
+        n = send(s, buf+total, len-total, flags);
+        if(n == -1) { break; }
+        total += n;
+    }
+    return (n==-1 ? -1 : total);
+}
+
+int recvAll(int s, char *buf, int len, int flags)
+{
+    int total = 0;
+    int n = 0;
+    
+    while(total < len)
+    {
+        n = recv(s, buf+total, len-total, flags);
+        if(n == -1) { break; }
+        total += n;
+    }
+    return (n==-1 ? -1 : total);
+}
 
 void die(char* msg)
 {
@@ -51,18 +80,21 @@ void* updateHistory(void* copy)
 {
     int* connectSocket = (int*)copy;
     char buff[200];
+    strcpy(buff, " "); //инициализация буфера
     int i = 0;
     while (1)
     {
-        if ( (i = (int)recv(*connectSocket, buff, 200, MSG_PEEK) ) > 0)
+        if ( (i = (int)recvAll(*connectSocket, buff, 200, MSG_PEEK) ) > 0) //ВОТ ЗДЕСЬ ИЗ СОКЕТА ДОСТАЁТСЯ ХУЁВЫЙ РЕСИВ
         {
             if (strcmp(brkFind(buff, 1), "update") == 0)
             {
-                recv(*connectSocket, buff, 200, 0);
+                //printf("%s", buff);
+                recvAll(*connectSocket, buff, 200, 0);
                 //printf("NEW UPDATE ADDED TO HISTORY\n");
                 strcpy(localHistory[historyPoint].total, fromWordToEnd(buff, 1));
                 historyPoint++;
-                usleep(1000);
+                usleep(2000);
+                strcpy(buff, " "); //очистка буфера
             }
         }
     }
@@ -70,10 +102,20 @@ void* updateHistory(void* copy)
 
 
 void connectToServer(int sockfd) {
-    char buff[100];
+    char buff[200];
     int flag = 1;
     printf("Enter ur command:");
     strcpy(buff, inputString());
+    while (buff[0] == ' ')
+    {
+        int i = 1;
+        while (buff[i] != '\0')
+        {
+            buff[i-1] = buff[i];
+            i++;
+        }
+        buff[i-1] = buff[i];
+    }
     if (strcmp(brkFind(buff, 1), "help") == 0)
     {
         printf("Available commands:\n help\n update\n history\n send\n exit\n");
@@ -93,9 +135,10 @@ void connectToServer(int sockfd) {
         flag = 0;
         printf("Enter ur message:");
         strcpy(buff, inputString());
-        char buffToSend[100];
+        char buffToSend[200];
         sprintf(buffToSend, "message %s", buff);
-        if (send(sockfd, buffToSend, 1 + strlen(buffToSend), 0) < 0)
+        //if (sendAll(sockfd, buffToSend, 1 + strlen(buffToSend), 0) < 0)
+        if (sendAll(sockfd, buffToSend, 200, 0) < 0)
         {
             die("can't send message");
         }
@@ -104,7 +147,7 @@ void connectToServer(int sockfd) {
     if (strcmp(buff, "exit") == 0)
     {
         printf("\nEXIT CODE\n");
-        if (send(sockfd, buff, 1 + strlen(buff), 0) < 0)
+        if (sendAll(sockfd, buff, 200, 0) < 0)
         {
             die("can't send message");
         }
@@ -149,7 +192,7 @@ int main(int argc, const char * argv[])
     }
     
     printf("sending msg '%s' to server...\n", argv[2]);
-    if (send(sockfd, argv[2], 1 + strlen(argv[2]), 0) < 0)
+    if (sendAll(sockfd, argv[2], 1 + strlen(argv[2]), 0) < 0)
     {
         die("can't send username");
     }

@@ -8,6 +8,7 @@
 
 //ipcrm -Q 125 ОЧИЩАЙ ОЧЕРЕДЬ СООБЩЕНИЙ
 //ipcrm -Q 126 ОЧИЩАЙ ОЧЕРЕДЬ СООБЩЕНИЙ
+//MSG_PEEK -- флаг на чтение из сокет-канала без удаления сообщения
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -43,6 +44,8 @@ void sendToHistoryServer(char* usernameToSend, char* currentTimeToSend, char* me
 void* HistoryServer(void* dummy);
 void* SyncHistoryWithConnectionServers(void* dummy);
 void* sendUpdate(void* copy);
+int sendAll(int s, char *buf, int len, int flags);
+int recvAll(int s, char *buf, int len, int flags);
 
 
 typedef enum{
@@ -67,7 +70,7 @@ typedef struct{
     char between1[5];
     char currentTimeHis[20];
     char between2[5];
-    char messageHis[100];
+    char messageHis[200];
     char end[5];
     statusesMessage status;
 }message_t;
@@ -83,6 +86,36 @@ pthread_t thread_id[THREADS_N];
 int historyFD = 0;
 s_t* historyVirt; //создание указателя на пользовательскую структуру (область в оперативе)
 int historyPoint = 0;
+char newUserstring[50] = "message NEW USER CONNECTED\0";
+
+int sendAll(int s, char *buf, int len, int flags)
+{
+    int total = 0;
+    int n = 0;
+    
+    while(total < len)
+    {
+        n = send(s, buf+total, len-total, flags);
+        if(n == -1) { break; }
+        total += n;
+    }
+    return (n==-1 ? -1 : total);
+}
+
+int recvAll(int s, char *buf, int len, int flags)
+{
+    int total = 0;
+    int n = 0;
+    
+    while(total < len)
+    {
+        n = recv(s, buf+total, len-total, flags);
+        if(n == -1) { break; }
+        total += n;
+    }
+    return (n==-1 ? -1 : total);
+}
+
 
 void* SyncHistoryWithConnectionServers(void* dummy)
 {
@@ -100,7 +133,7 @@ void* SyncHistoryWithConnectionServers(void* dummy)
         long mtype;
         char username[50];
         char currentTime[20];
-        char message[100];
+        char message[200];
     } mybuf;
     
     /* Пытаемся получить доступ по ключу к очереди сообщений, если она существует,
@@ -160,7 +193,7 @@ void* HistoryServer(void* dummy)
         long mtype;
         char username[50];
         char currentTime[20];
-        char message[100];
+        char message[200];
     } mybuf;
     
     /* Пытаемся получить доступ по ключу к очереди сообщений, если она существует,
@@ -180,7 +213,7 @@ void* HistoryServer(void* dummy)
             printf("Can\'t receive message from queue\n");
             exit(-1);
         }
-        char kostyl[100];
+        char kostyl[200];
         strcpy(kostyl, fromWordToEnd(mybuf.message, 1));
         strcpy(historyVirt->history[historyPoint].usernameHis, mybuf.username);
         strcpy(historyVirt->history[historyPoint].between1, " at ");
@@ -210,7 +243,7 @@ void sendToHistoryServer(char* usernameToSend, char* currentTimeToSend, char* me
                  long mtype;
                  char username[50];
                  char currentTime[20];
-                 char message[100];
+                 char message[200];
                  } mybuf;
     
              /* Пытаемся получить доступ по ключу к очереди сообщений, если она существует,
@@ -267,7 +300,7 @@ void* sendUpdate(void* copy)
         long mtype;
         char username[50];
         char currentTime[20];
-        char message[100];
+        char message[200];
     } mybuf;
     
     /* Пытаемся получить доступ по ключу к очереди сообщений, если она существует,
@@ -290,7 +323,9 @@ void* sendUpdate(void* copy)
         
         char kostyl[200];
         sprintf(kostyl, "update %s at %s : %s\n", mybuf.username, mybuf.currentTime, mybuf.message);
-        if (send(*socket, kostyl, 1 + strlen(kostyl), 0) < 0)
+        printf("%s", kostyl);
+        //if (sendAll(*socket, kostyl, (int)(3 + strlen(kostyl)), 0) < 0)
+        if (sendAll(*socket, kostyl, 200, 0) < 0)
         {
             die("can't send message");
         }
@@ -307,9 +342,11 @@ void connectionServer(int* socket, char* username)
         printf("Can't create thread, returned value = %d\n", result);
         exit(-1);
     }
-    char buff[100];
+    char buff[200];
+    strcpy(buff, " "); //очистка буфера
     char currentTime[20];
-    recv(*socket, buff, 100, MSG_PEEK);
+    sendToHistoryServer(username, getTime(), newUserstring);
+    recvAll(*socket, buff, 200, MSG_PEEK);
     strcpy(currentTime, getTime());
     while (1)
     {
@@ -327,11 +364,12 @@ void connectionServer(int* socket, char* username)
         }
         if (strcmp(brkFind(buff, 1), "message") == 0)
         {
-            recv(*socket, buff, 100, 0);
+            recvAll(*socket, buff, 200, 0);
             sendToHistoryServer(username, currentTime, buff);
+            strcpy(buff, " "); //очистка буфера
         }
-        usleep(100);
-        recv(*socket, buff, 100, MSG_PEEK);
+        usleep(1000);
+        recvAll(*socket, buff, 200, MSG_PEEK);
         strcpy(currentTime, getTime());
     }
 }
@@ -367,11 +405,11 @@ void die(char* msg)
 
 static void newRequest(int* connfd)
 {
-    char buff[100];
+    char buff[200];
     int flag = 0;
     int index = 0;
     printf("Waiting for the username ...\n");
-    recv(*connfd, buff, 100, 0);
+    recv(*connfd, buff, 200, 0);
     printf("[SERVER] New request from %s\n\n", buff);
     for (int i = 0; i < USERS_NUMBER; i++)
     {
