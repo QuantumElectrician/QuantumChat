@@ -46,6 +46,7 @@ void* SyncHistoryWithConnectionServers(void* dummy);
 void* sendUpdate(void* copy);
 int sendAll(int s, char *buf, int len, int flags);
 int recvAll(int s, char *buf, int len, int flags);
+void cutEnd(char*);
 
 
 typedef enum{
@@ -87,6 +88,21 @@ int historyFD = 0;
 s_t* historyVirt; //создание указателя на пользовательскую структуру (область в оперативе)
 int historyPoint = 0;
 char newUserstring[50] = "message NEW USER CONNECTED\0";
+
+void cutEnd(char* string)
+{
+    int i = 0;
+    while(string[i] != '\0')
+    {
+        if ((string[i] != '2') && (string[i+1] != '7') && (string[i+2] != '1') && (string[i+3] != '8'))
+        {
+            string[i] = '\n';
+            string[i+1] = '\0';
+            break;
+        }
+        i++;
+    }
+}
 
 int sendAll(int s, char *buf, int len, int flags)
 {
@@ -322,7 +338,7 @@ void* sendUpdate(void* copy)
         }
         
         char kostyl[200];
-        sprintf(kostyl, "update %s at %s : %s\n", mybuf.username, mybuf.currentTime, mybuf.message);
+        sprintf(kostyl, "update %s at %s : %s 2718281828\n", mybuf.username, mybuf.currentTime, mybuf.message);
         printf("%s", kostyl);
         //if (sendAll(*socket, kostyl, (int)(3 + strlen(kostyl)), 0) < 0)
         if (sendAll(*socket, kostyl, 200, 0) < 0)
@@ -365,6 +381,7 @@ void connectionServer(int* socket, char* username)
         if (strcmp(brkFind(buff, 1), "message") == 0)
         {
             recvAll(*socket, buff, 200, 0);
+            cutEnd(buff);
             sendToHistoryServer(username, currentTime, buff);
             strcpy(buff, " "); //очистка буфера
         }
