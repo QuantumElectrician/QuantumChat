@@ -32,7 +32,7 @@ typedef struct{
 
 message_t localHistory[HISTORY_N];
 int historyPoint = 0;
-pthread_mutex_t lock;
+char currentUser[20];
 
 void die(char* msg)
 {
@@ -59,12 +59,20 @@ void* updateHistory(void* copy)
         {
             if (strcmp(brkFind(buff, 1), "update") == 0)
             {
-                pthread_mutex_lock(&lock);
                 recv(*connectSocket, buff, 200, 0);
-                printf("No Command\n----------\nNEW UPDATE\n----------\n");
                 strcpy(localHistory[historyPoint].total, fromWordToEnd(buff, 1));
-                printf("%sEnter ur command:", localHistory[historyPoint].total);
-                pthread_mutex_unlock(&lock);
+                if (strcmp(brkFind(buff, 2), currentUser) != 0) //не уведомлять о своих сообщениях
+                {
+                    printf("No Command\n-----------\nNEW MESSAGE\n-----------\n");
+                    printf("%s\nEnter ur command:", localHistory[historyPoint].total);
+                }
+                else //но если сообщение этого клиента, то заменить его username на YOU
+                {
+                    memset(buff, 0, sizeof(buff)); //очистка буфера
+                    sprintf(buff, "YOU %s", fromWordToEnd(localHistory[historyPoint].total, 1));
+                    strcpy(localHistory[historyPoint].total, buff);
+                    memset(buff, 0, sizeof(buff)); //очистка буфера
+                }
                 historyPoint++;
                 usleep(1000);
             }
@@ -92,12 +100,9 @@ void connectToServer(int sockfd) {
         printf("Available commands:\n help\n update\n history\n send\n exit\n");
         flag = 0;
     }
-    if (strcmp(brkFind(buff, 1), "update") == 0)
-    {
-        flag = 0;
-    }
     if (strcmp(brkFind(buff, 1), "history") == 0)
     {
+        printf("\n");
         printHistory();
         flag = 0;
     }
@@ -128,15 +133,15 @@ void connectToServer(int sockfd) {
     
     if (flag == 1)
     {
-        printf("\nIncorrect entrance\n\nAvailable commands:\n help\n update\n history\n send\n exit\n");
+        printf("\nIncorrect entrance\n\nAvailable commands:\n help\n history\n send\n exit\n");
     }
 }
 
 int main(int argc, const char * argv[])
 {
+    strcpy(currentUser, argv[2]);
     int sockfd;
     struct sockaddr_in serv_addr;
-    pthread_mutex_init(&lock, NULL); //инициализация лока
     
     if(argc != 3)
     {
@@ -148,7 +153,7 @@ int main(int argc, const char * argv[])
     {
         die("can't create socket");
     }
-    
+
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_port = htons(5000);
     
@@ -178,7 +183,7 @@ int main(int argc, const char * argv[])
     }
     
     printf("Connected to server and sent ur username succesfully\n");
-    printf("Welcome to Chat!\n Use 'help' for list of commands\n");
+    printf("Welcome to Chat!\nUse 'help' for list of commands\n");
     while (1)
     {
         connectToServer(sockfd);

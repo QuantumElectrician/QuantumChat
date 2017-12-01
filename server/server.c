@@ -44,9 +44,6 @@ void sendToHistoryServer(char* usernameToSend, char* currentTimeToSend, char* me
 void* HistoryServer(void* dummy);
 void* SyncHistoryWithConnectionServers(void* dummy);
 void* sendUpdate(void* copy);
-int sendAll(int s, char *buf, int len, int flags);
-int recvAll(int s, char *buf, int len, int flags);
-void cutEnd(char*);
 
 
 typedef enum{
@@ -82,14 +79,10 @@ typedef struct
 
 int listenSocket;
 user_t users[USERS_NUMBER];
-pthread_mutex_t lock;
 pthread_t thread_id[THREADS_N];
 int historyFD = 0;
 s_t* historyVirt; //создание указателя на пользовательскую структуру (область в оперативе)
 int historyPoint = 0;
-pthread_mutex_t lockMain;
-pthread_mutex_t lockConnectionServer;
-pthread_mutex_t lockHistoryServer;
 
 void* SyncHistoryWithConnectionServers(void* dummy)
 {
@@ -133,12 +126,9 @@ void* SyncHistoryWithConnectionServers(void* dummy)
                     if (users[j].status == ONLINE)
                     {
                         mybuf.mtype = (int)users[j].connectionServer;
-                        pthread_mutex_lock(&lockMain);
                         strcpy(mybuf.username, historyVirt->history[i].usernameHis);
                         strcpy(mybuf.message, historyVirt->history[i].messageHis);
                         strcpy(mybuf.currentTime, historyVirt->history[i].currentTimeHis);
-                        printf("%s\n", mybuf.message);
-                        pthread_mutex_unlock(&lockMain);
                         /* Отсылаем сообщение. В случае ошибки сообщаем об этом */
                         if (msgsnd(msqid, (struct mymsgbuf *) &mybuf, len, 0) < 0)
                         {
@@ -190,21 +180,28 @@ void* HistoryServer(void* dummy)
             printf("Can\'t receive message from queue\n");
             exit(-1);
         }
-        printf("%s from HistoryServer [buff]\n", mybuf.message);
-        printf("%s from HistoryServer [SASHA]\n", fromWordToEnd(mybuf.message, 1));
         char kostyl[100];
-        pthread_mutex_lock(&lockHistoryServer);
         strcpy(kostyl, fromWordToEnd(mybuf.message, 1));
         strcpy(historyVirt->history[historyPoint].usernameHis, mybuf.username);
         strcpy(historyVirt->history[historyPoint].between1, " at ");
         strcpy(historyVirt->history[historyPoint].currentTimeHis, mybuf.currentTime);
         strcpy(historyVirt->history[historyPoint].between2, " : ");
-        //САША-ХУЕСОС И ЕГО ФУНКЦИЯ СЛОМАЛА МНЕ ПРОГУ (И МОЮ ЖИЗНЬ) ЕГО ФУНКЦИЯ ДОБАВЛЯЕТ НОВЫЕ СИМВОЛЫ ПРЯМО ТУТ
         strcpy(historyVirt->history[historyPoint].messageHis,kostyl);
-        printf("%s from HistoryServer [kostyl]\n", kostyl);
         strcpy(historyVirt->history[historyPoint].end, "\n");
-        historyVirt->history[historyPoint].status = NEW;
-        pthread_mutex_unlock(&lockHistoryServer);
+        
+        //ВРЕМЕННАЯ МЕРА 
+        if (strcmp(kostyl, "[SYSTEM] DISCONNECTED") == 0)
+        {
+            for (int i = 0; i < USERS_NUMBER; i++)
+            {
+                if (strcmp(users[i].username, mybuf.username) == 0)
+                {
+                    users[i].status = OFFLINE;
+                }
+            }
+        }
+        
+        historyVirt->history[historyPoint].status = NEW; //в этот момент синхронизатор подхватит это сообщение всем на пересылку
         msync(&(historyVirt->history[historyPoint]), sizeof(message_t), MS_SYNC); //принудительная синхронизация истории и виртуальной истории
         historyPoint++;
     }
@@ -240,13 +237,9 @@ void sendToHistoryServer(char* usernameToSend, char* currentTimeToSend, char* me
     
     /* Сначала заполняем структуру для нашего сообщения и определяем длину информативной части */
     mybuf.mtype = 1;
-    pthread_mutex_lock(&lockConnectionServer);
     strcpy(mybuf.username, usernameToSend);
     strcpy(mybuf.message, messageToSend);
     strcpy(mybuf.currentTime, currentTimeToSend);
-    pthread_mutex_unlock(&lockConnectionServer);
-    printf("%s from sendToHistoryServer\n", mybuf.message);
-    printf("%s from sendToHistoryServer\n", messageToSend);
     len = 170;
     /* Отсылаем сообщение. В случае ошибки сообщаем об этом */
     if (msgsnd(msqid, (struct mymsgbuf *) &mybuf, len, 0) < 0)
@@ -265,7 +258,7 @@ char* getTime(void)
     bzero(tbuf,64);
     time(&now);
     ptr = localtime(&now);
-    strftime(tbuf,64, "%Y-%m-%e %H:%M:%S", ptr);
+    strftime(tbuf,64, "%e-%m-%Y %H:%M:%S", ptr);
     return tbuf;
 }
 
@@ -308,7 +301,6 @@ void* sendUpdate(void* copy)
             exit(-1);
         }
         char kostyl[200];
-        printf("%s\n", mybuf.message);
         sprintf(kostyl, "update %s at %s : %s\n", mybuf.username, mybuf.currentTime, mybuf.message);
         if (send(*socket, kostyl, 1 + strlen(kostyl), 0) < 0)
         {
@@ -329,7 +321,7 @@ void connectionServer(int* socket, char* username)
     }
     char buff[100];
     char currentTime[20];
-    sendToHistoryServer(username, getTime(), "message NEW USER");
+    sendToHistoryServer(username, getTime(), "message [SYSTEM] NEW USER CONNECTED");
     recv(*socket, buff, 100, MSG_PEEK);
     strcpy(currentTime, getTime());
     while (1)
@@ -337,13 +329,9 @@ void connectionServer(int* socket, char* username)
         if (strcmp(brkFind(buff, 1), "exit") == 0)
         {
             close(*socket);
-            for (int i = 0; i < USERS_NUMBER; i++)
-            {
-                if (strcmp(users[i].username, username) == 0)
-                {
-                    users[i].status = OFFLINE;
-                }
-            }
+            //тут нельзя поставить отключенному пользователю ОФЛАЙН, так как оригинал базы лежит на MainServer, а здесь только копия
+            //Решение: все сервера обработчики через mmap коннектятся с файлу-базе пользователей
+            sendToHistoryServer(username, getTime(), "message [SYSTEM] DISCONNECTED");
             exit(0);
         }
         if (strcmp(brkFind(buff, 1), "message") == 0)
@@ -442,10 +430,6 @@ int main(int argc, const char * argv[])
     
     signal( SIGCHLD, SIG_IGN ); //отсутствие зомби
     
-    pthread_mutex_init(&lockMain, NULL); //инициализация лока
-    pthread_mutex_init(&lockConnectionServer, NULL); //инициализация лока
-    pthread_mutex_init(&lockHistoryServer, NULL); //инициализация лока
-
     //создание треда для поддержания истории
     pthread_t threadIDHistory;
     int result;
