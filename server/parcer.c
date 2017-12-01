@@ -76,7 +76,7 @@ char* fromWordToEnd (char* input, int n) {
         for (int i = beginCut; i<endCut; i++) {
             toSend[i-beginCut] = input[i];
         }
-        toSend[endCut+1] = '\0';
+        toSend[endCut-beginCut] = '\0';
         return toSend;
     }
 }

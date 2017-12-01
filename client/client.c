@@ -25,8 +25,6 @@ void die(char*);
 void connectToServer(int);
 void* updateHistory(void*);
 void printHistory(void);
-int sendAll(int s, char *buf, int len, int flags);
-void cutEnd(char* string);
 
 typedef struct{
     char total[200];
@@ -34,51 +32,7 @@ typedef struct{
 
 message_t localHistory[HISTORY_N];
 int historyPoint = 0;
-
-void cutEnd(char* string)
-{
-    int i = 0;
-    while(string[i] != '\0')
-    {
-        if ((string[i] == '2') && (string[i+1] == '7') && (string[i+2] == '1') && (string[i+3] == '8'))
-        {
-            string[i-1] = '\n';
-            string[i] = '\0';
-            string[i+1] = '\0';
-            string[i+2] = '\0';
-            break;
-        }
-        i++;
-    }
-}
-
-int sendAll(int s, char *buf, int len, int flags)
-{
-    int total = 0;
-    int n = 0;
-    
-    while(total < len)
-    {
-        n = send(s, buf+total, len-total, flags);
-        if(n == -1) { break; }
-        total += n;
-    }
-    return (n==-1 ? -1 : total);
-}
-
-int recvAll(int s, char *buf, int len, int flags)
-{
-    int total = 0;
-    int n = 0;
-    
-    while(total < len)
-    {
-        n = recv(s, buf+total, len-total, flags);
-        if(n == -1) { break; }
-        total += n;
-    }
-    return (n==-1 ? -1 : total);
-}
+pthread_mutex_t lock;
 
 void die(char* msg)
 {
@@ -97,23 +51,22 @@ void printHistory()
 void* updateHistory(void* copy)
 {
     int* connectSocket = (int*)copy;
-    char buff[200] = " ";
-    //strcpy(buff, " "); //инициализация буфера
+    char buff[200];
     int i = 0;
     while (1)
     {
-        if ( (i = (int)recvAll(*connectSocket, buff, 200, MSG_PEEK) ) > 0)
+        if ( (i = (int)recv(*connectSocket, buff, 200, MSG_PEEK) ) > 0)
         {
             if (strcmp(brkFind(buff, 1), "update") == 0)
             {
-                //printf("%s", buff);
-                recvAll(*connectSocket, buff, 200, 0);
-                cutEnd(buff);
-                printf("$\n --------------------------\n   YOU HAVE A NEW MESSAGE\n --------------------------\nEnter ur command:");
+                pthread_mutex_lock(&lock);
+                recv(*connectSocket, buff, 200, 0);
+                printf("No Command\n----------\nNEW UPDATE\n----------\n");
                 strcpy(localHistory[historyPoint].total, fromWordToEnd(buff, 1));
+                printf("%sEnter ur command:", localHistory[historyPoint].total);
+                pthread_mutex_unlock(&lock);
                 historyPoint++;
-                usleep(2000);
-                strcpy(buff, " "); //очистка буфера
+                usleep(1000);
             }
         }
     }
@@ -121,19 +74,18 @@ void* updateHistory(void* copy)
 
 
 void connectToServer(int sockfd) {
-    char buff[200];
+    char buff[100];
     int flag = 1;
     printf("Enter ur command:");
     strcpy(buff, inputString());
     while (buff[0] == ' ')
     {
-        int i = 1;
+        int i = 0;
         while (buff[i] != '\0')
         {
-            buff[i-1] = buff[i];
+            buff[i] = buff[i+1];
             i++;
         }
-        buff[i-1] = buff[i];
     }
     if (strcmp(brkFind(buff, 1), "help") == 0)
     {
@@ -154,10 +106,9 @@ void connectToServer(int sockfd) {
         flag = 0;
         printf("Enter ur message:");
         strcpy(buff, inputString());
-        char buffToSend[200];
-        sprintf(buffToSend, "message %s 271828", buff);
-        //if (sendAll(sockfd, buffToSend, 1 + strlen(buffToSend), 0) < 0)
-        if (sendAll(sockfd, buffToSend, 200, 0) < 0)
+        char buffToSend[100];
+        sprintf(buffToSend, "message %s", buff);
+        if (send(sockfd, buffToSend, 1 + strlen(buffToSend), 0) < 0)
         {
             die("can't send message");
         }
@@ -166,7 +117,7 @@ void connectToServer(int sockfd) {
     if (strcmp(buff, "exit") == 0)
     {
         printf("\nEXIT CODE\n");
-        if (sendAll(sockfd, buff, 200, 0) < 0)
+        if (send(sockfd, buff, 1 + strlen(buff), 0) < 0)
         {
             die("can't send message");
         }
@@ -185,6 +136,7 @@ int main(int argc, const char * argv[])
 {
     int sockfd;
     struct sockaddr_in serv_addr;
+    pthread_mutex_init(&lock, NULL); //инициализация лока
     
     if(argc != 3)
     {
@@ -211,7 +163,7 @@ int main(int argc, const char * argv[])
     }
     
     printf("sending msg '%s' to server...\n", argv[2]);
-    if (sendAll(sockfd, argv[2], 1 + strlen(argv[2]), 0) < 0)
+    if (send(sockfd, argv[2], 1 + strlen(argv[2]), 0) < 0)
     {
         die("can't send username");
     }

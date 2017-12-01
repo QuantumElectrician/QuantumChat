@@ -87,51 +87,9 @@ pthread_t thread_id[THREADS_N];
 int historyFD = 0;
 s_t* historyVirt; //создание указателя на пользовательскую структуру (область в оперативе)
 int historyPoint = 0;
-char newUserstring[50] = "message NEW USER CONNECTED\0";
-
-void cutEnd(char* string)
-{
-    int i = 0;
-    while(string[i] != '\0')
-    {
-        if ((string[i] != '2') && (string[i+1] != '7') && (string[i+2] != '1') && (string[i+3] != '8'))
-        {
-            string[i] = '\n';
-            string[i+1] = '\0';
-            break;
-        }
-        i++;
-    }
-}
-
-int sendAll(int s, char *buf, int len, int flags)
-{
-    int total = 0;
-    int n = 0;
-    
-    while(total < len)
-    {
-        n = send(s, buf+total, len-total, flags);
-        if(n == -1) { break; }
-        total += n;
-    }
-    return (n==-1 ? -1 : total);
-}
-
-int recvAll(int s, char *buf, int len, int flags)
-{
-    int total = 0;
-    int n = 0;
-    
-    while(total < len)
-    {
-        n = recv(s, buf+total, len-total, flags);
-        if(n == -1) { break; }
-        total += n;
-    }
-    return (n==-1 ? -1 : total);
-}
-
+pthread_mutex_t lockMain;
+pthread_mutex_t lockConnectionServer;
+pthread_mutex_t lockHistoryServer;
 
 void* SyncHistoryWithConnectionServers(void* dummy)
 {
@@ -149,7 +107,7 @@ void* SyncHistoryWithConnectionServers(void* dummy)
         long mtype;
         char username[50];
         char currentTime[20];
-        char message[200];
+        char message[100];
     } mybuf;
     
     /* Пытаемся получить доступ по ключу к очереди сообщений, если она существует,
@@ -175,9 +133,12 @@ void* SyncHistoryWithConnectionServers(void* dummy)
                     if (users[j].status == ONLINE)
                     {
                         mybuf.mtype = (int)users[j].connectionServer;
+                        pthread_mutex_lock(&lockMain);
                         strcpy(mybuf.username, historyVirt->history[i].usernameHis);
                         strcpy(mybuf.message, historyVirt->history[i].messageHis);
                         strcpy(mybuf.currentTime, historyVirt->history[i].currentTimeHis);
+                        printf("%s\n", mybuf.message);
+                        pthread_mutex_unlock(&lockMain);
                         /* Отсылаем сообщение. В случае ошибки сообщаем об этом */
                         if (msgsnd(msqid, (struct mymsgbuf *) &mybuf, len, 0) < 0)
                         {
@@ -209,7 +170,7 @@ void* HistoryServer(void* dummy)
         long mtype;
         char username[50];
         char currentTime[20];
-        char message[200];
+        char message[100];
     } mybuf;
     
     /* Пытаемся получить доступ по ключу к очереди сообщений, если она существует,
@@ -229,15 +190,21 @@ void* HistoryServer(void* dummy)
             printf("Can\'t receive message from queue\n");
             exit(-1);
         }
-        char kostyl[200];
+        printf("%s from HistoryServer [buff]\n", mybuf.message);
+        printf("%s from HistoryServer [SASHA]\n", fromWordToEnd(mybuf.message, 1));
+        char kostyl[100];
+        pthread_mutex_lock(&lockHistoryServer);
         strcpy(kostyl, fromWordToEnd(mybuf.message, 1));
         strcpy(historyVirt->history[historyPoint].usernameHis, mybuf.username);
         strcpy(historyVirt->history[historyPoint].between1, " at ");
         strcpy(historyVirt->history[historyPoint].currentTimeHis, mybuf.currentTime);
         strcpy(historyVirt->history[historyPoint].between2, " : ");
+        //САША-ХУЕСОС И ЕГО ФУНКЦИЯ СЛОМАЛА МНЕ ПРОГУ (И МОЮ ЖИЗНЬ) ЕГО ФУНКЦИЯ ДОБАВЛЯЕТ НОВЫЕ СИМВОЛЫ ПРЯМО ТУТ
         strcpy(historyVirt->history[historyPoint].messageHis,kostyl);
+        printf("%s from HistoryServer [kostyl]\n", kostyl);
         strcpy(historyVirt->history[historyPoint].end, "\n");
         historyVirt->history[historyPoint].status = NEW;
+        pthread_mutex_unlock(&lockHistoryServer);
         msync(&(historyVirt->history[historyPoint]), sizeof(message_t), MS_SYNC); //принудительная синхронизация истории и виртуальной истории
         historyPoint++;
     }
@@ -259,7 +226,7 @@ void sendToHistoryServer(char* usernameToSend, char* currentTimeToSend, char* me
                  long mtype;
                  char username[50];
                  char currentTime[20];
-                 char message[200];
+                 char message[100];
                  } mybuf;
     
              /* Пытаемся получить доступ по ключу к очереди сообщений, если она существует,
@@ -273,9 +240,13 @@ void sendToHistoryServer(char* usernameToSend, char* currentTimeToSend, char* me
     
     /* Сначала заполняем структуру для нашего сообщения и определяем длину информативной части */
     mybuf.mtype = 1;
+    pthread_mutex_lock(&lockConnectionServer);
     strcpy(mybuf.username, usernameToSend);
     strcpy(mybuf.message, messageToSend);
     strcpy(mybuf.currentTime, currentTimeToSend);
+    pthread_mutex_unlock(&lockConnectionServer);
+    printf("%s from sendToHistoryServer\n", mybuf.message);
+    printf("%s from sendToHistoryServer\n", messageToSend);
     len = 170;
     /* Отсылаем сообщение. В случае ошибки сообщаем об этом */
     if (msgsnd(msqid, (struct mymsgbuf *) &mybuf, len, 0) < 0)
@@ -316,7 +287,7 @@ void* sendUpdate(void* copy)
         long mtype;
         char username[50];
         char currentTime[20];
-        char message[200];
+        char message[100];
     } mybuf;
     
     /* Пытаемся получить доступ по ключу к очереди сообщений, если она существует,
@@ -336,12 +307,10 @@ void* sendUpdate(void* copy)
             printf("Can\'t receive message from queue\n");
             exit(-1);
         }
-        
         char kostyl[200];
-        sprintf(kostyl, "update %s at %s : %s 2718281828\n", mybuf.username, mybuf.currentTime, mybuf.message);
-        printf("%s", kostyl);
-        //if (sendAll(*socket, kostyl, (int)(3 + strlen(kostyl)), 0) < 0)
-        if (sendAll(*socket, kostyl, 200, 0) < 0)
+        printf("%s\n", mybuf.message);
+        sprintf(kostyl, "update %s at %s : %s\n", mybuf.username, mybuf.currentTime, mybuf.message);
+        if (send(*socket, kostyl, 1 + strlen(kostyl), 0) < 0)
         {
             die("can't send message");
         }
@@ -358,11 +327,10 @@ void connectionServer(int* socket, char* username)
         printf("Can't create thread, returned value = %d\n", result);
         exit(-1);
     }
-    char buff[200];
-    strcpy(buff, " "); //очистка буфера
+    char buff[100];
     char currentTime[20];
-    sendToHistoryServer(username, getTime(), newUserstring);
-    recvAll(*socket, buff, 200, MSG_PEEK);
+    sendToHistoryServer(username, getTime(), "message NEW USER");
+    recv(*socket, buff, 100, MSG_PEEK);
     strcpy(currentTime, getTime());
     while (1)
     {
@@ -380,13 +348,11 @@ void connectionServer(int* socket, char* username)
         }
         if (strcmp(brkFind(buff, 1), "message") == 0)
         {
-            recvAll(*socket, buff, 200, 0);
-            cutEnd(buff);
+            recv(*socket, buff, 100, 0);
             sendToHistoryServer(username, currentTime, buff);
-            strcpy(buff, " "); //очистка буфера
         }
-        usleep(1000);
-        recvAll(*socket, buff, 200, MSG_PEEK);
+        usleep(100);
+        recv(*socket, buff, 100, MSG_PEEK);
         strcpy(currentTime, getTime());
     }
 }
@@ -422,11 +388,11 @@ void die(char* msg)
 
 static void newRequest(int* connfd)
 {
-    char buff[200];
+    char buff[100];
     int flag = 0;
     int index = 0;
     printf("Waiting for the username ...\n");
-    recv(*connfd, buff, 200, 0);
+    recv(*connfd, buff, 100, 0);
     printf("[SERVER] New request from %s\n\n", buff);
     for (int i = 0; i < USERS_NUMBER; i++)
     {
@@ -476,6 +442,10 @@ int main(int argc, const char * argv[])
     
     signal( SIGCHLD, SIG_IGN ); //отсутствие зомби
     
+    pthread_mutex_init(&lockMain, NULL); //инициализация лока
+    pthread_mutex_init(&lockConnectionServer, NULL); //инициализация лока
+    pthread_mutex_init(&lockHistoryServer, NULL); //инициализация лока
+
     //создание треда для поддержания истории
     pthread_t threadIDHistory;
     int result;
