@@ -25,6 +25,8 @@ void die(char*);
 void connectToServer(int);
 void* updateHistory(void*);
 void printHistory(void);
+char* hash(char* string);
+void password(int socket);
 
 typedef struct{
     char total[200];
@@ -33,6 +35,17 @@ typedef struct{
 message_t localHistory[HISTORY_N];
 int historyPoint = 0;
 char currentUser[20];
+
+char* hash(char* string)
+{
+    int hash = 0;
+    for (int i = 0; i < strlen(string); i++)
+    {
+        hash = string[i] + (hash << 6) + (hash << 16) - hash;
+    }
+    sprintf(string, "%d", hash);
+    return string;
+}
 
 void die(char* msg)
 {
@@ -61,17 +74,17 @@ void* updateHistory(void* copy)
             {
                 recv(*connectSocket, buff, 200, 0);
                 strcpy(localHistory[historyPoint].total, fromWordToEnd(buff, 1));
-                if (strcmp(brkFind(buff, 2), currentUser) != 0) //не уведомлять о своих сообщениях
-                {
-                    printf("No Command\n-----------\nNEW MESSAGE\n-----------\n");
-                    printf("%s\nEnter ur command:", localHistory[historyPoint].total);
-                }
-                else //но если сообщение этого клиента, то заменить его username на YOU
+                if (strcmp(brkFind(buff, 2), currentUser) == 0) //но если сообщение этого клиента, то заменить его username на YOU
                 {
                     memset(buff, 0, sizeof(buff)); //очистка буфера
                     sprintf(buff, "YOU %s", fromWordToEnd(localHistory[historyPoint].total, 1));
                     strcpy(localHistory[historyPoint].total, buff);
                     memset(buff, 0, sizeof(buff)); //очистка буфера
+                }
+                else //не уведомлять о своих сообщениях
+                {
+                    printf("No Command\n-----------\nNEW MESSAGE\n-----------\n");
+                    printf("%s\nEnter ur command:", localHistory[historyPoint].total);
                 }
                 historyPoint++;
                 usleep(1000);
@@ -81,9 +94,44 @@ void* updateHistory(void* copy)
 }
 
 
+void password(int socket)
+{
+    //тут функция ПАРОЛЯ
+    printf("Enter ur password:");
+    char buff[100];
+    char pass[40];
+    int i = 0;
+    sprintf(pass, "password %s", hash(inputString()));
+    send(socket, pass, 1 + strlen(pass), 0);
+    if ( (i = (int)recv(socket, buff, 200, MSG_PEEK) ) > 0)
+    {
+        if (strcmp(brkFind(buff, 1), "passwordAnswer") == 0)
+        {
+            recv(socket, buff, 200, 0);
+            if (strcmp(brkFind(buff, 3), "denied") == 0)
+            {
+                printf("Sorry, Access denied\n");
+                printf("\nEXIT CODE\n");
+                if (send(socket, buff, 1 + strlen(buff), 0) < 0)
+                {
+                    die("can't send message");
+                }
+                sleep(1);
+                close(socket);
+                exit(0);
+            }
+            else
+            {
+                printf("Access approved\n");
+            }
+        }
+    }
+}
+
 void connectToServer(int sockfd) {
     char buff[100];
     int flag = 1;
+    password(sockfd);
     printf("Enter ur command:");
     strcpy(buff, inputString());
     while (buff[0] == ' ')
@@ -167,8 +215,8 @@ int main(int argc, const char * argv[])
         die("Connect Failed");
     }
     
-    printf("sending msg '%s' to server...\n", argv[2]);
-    if (send(sockfd, argv[2], 1 + strlen(argv[2]), 0) < 0)
+    printf("sending msg '%s' to server...\n", currentUser);
+    if (send(sockfd, currentUser, 1 + strlen(currentUser), 0) < 0)
     {
         die("can't send username");
     }

@@ -38,7 +38,7 @@
 void die(char*);
 static void newRequest(int*);
 int addToUsers(char*);
-void connectionServer(int* , char*);
+void connectionServer(int* , char*, int, int);
 char* getTime(void);
 void sendToHistoryServer(char* usernameToSend, char* currentTimeToSend, char* messageToSend);
 void* HistoryServer(void* dummy);
@@ -58,7 +58,7 @@ typedef enum{
 }statusesMessage;
 typedef struct{
     char username[20];
-    int password;
+    char password[20];
     statusesUser status;
     pid_t connectionServer;
     int connectionSocket;
@@ -181,6 +181,21 @@ void* HistoryServer(void* dummy)
             exit(-1);
         }
         char kostyl[100];
+        //добавление нового пароля в базу данных пользователя
+        if (strcmp(brkFind(mybuf.message, 1), "password") == 0)//временно
+        {
+            for (int i = 0; i < USERS_NUMBER; i++)
+            {
+                if (strcmp(users[i].username, mybuf.username) == 0)
+                {
+                    strcpy(users[i].password, fromWordToEnd(mybuf.message, 1));
+                    strcpy(kostyl, "passwordAnswer access approved");
+                    send(users[i].connectionSocket, kostyl, 1 + strlen(kostyl), 0);
+                }
+            }
+        }
+        else
+        {//временно
         strcpy(kostyl, fromWordToEnd(mybuf.message, 1));
         strcpy(historyVirt->history[historyPoint].usernameHis, mybuf.username);
         strcpy(historyVirt->history[historyPoint].between1, " at ");
@@ -204,6 +219,7 @@ void* HistoryServer(void* dummy)
         historyVirt->history[historyPoint].status = NEW; //в этот момент синхронизатор подхватит это сообщение всем на пересылку
         msync(&(historyVirt->history[historyPoint]), sizeof(message_t), MS_SYNC); //принудительная синхронизация истории и виртуальной истории
         historyPoint++;
+        }//временно
     }
 }
 
@@ -309,7 +325,7 @@ void* sendUpdate(void* copy)
     }
 }
 
-void connectionServer(int* socket, char* username)
+void connectionServer(int* socket, char* username, int flag, int index) //флаг == 1, если пользователь есть в базе
 {
     //создание треда для создания истории
     pthread_t threadIdUpdate;
@@ -321,12 +337,15 @@ void connectionServer(int* socket, char* username)
     }
     char buff[100];
     char currentTime[20];
-    sendToHistoryServer(username, getTime(), "message [SYSTEM] NEW USER CONNECTED");
+    char task[12];
+    sendToHistoryServer(username, getTime(), "message [SYSTEM] NEW USER CONNECTED"); //уведомление о подключении нового пользователя
     recv(*socket, buff, 100, MSG_PEEK);
     strcpy(currentTime, getTime());
     while (1)
     {
-        if (strcmp(brkFind(buff, 1), "exit") == 0)
+        strcpy(task, brkFind(buff, 1));
+        
+        if (strcmp(task, "exit") == 0)
         {
             close(*socket);
             //тут нельзя поставить отключенному пользователю ОФЛАЙН, так как оригинал базы лежит на MainServer, а здесь только копия
@@ -334,12 +353,39 @@ void connectionServer(int* socket, char* username)
             sendToHistoryServer(username, getTime(), "message [SYSTEM] DISCONNECTED");
             exit(0);
         }
-        if (strcmp(brkFind(buff, 1), "message") == 0)
+        if (strcmp(task, "message") == 0)
         {
             recv(*socket, buff, 100, 0);
             sendToHistoryServer(username, currentTime, buff);
         }
-        usleep(100);
+        if (strcmp(task, "password") == 0)
+        {
+            recv(*socket, buff, 100, 0);
+            if (flag == 1) //если пользователь был зарегестрирован до подключения
+            {
+                if(strcmp(users[index].password, brkFind(buff, 2)) == 0)
+                {
+                    memset(buff, 0, sizeof(buff)); //очистка буфера
+                    strcpy(buff, "passwordAnswer access approved");
+                    send(*socket, buff, 1 + strlen(buff), 0);
+                }
+                else
+                {
+                    memset(buff, 0, sizeof(buff)); //очистка буфера
+                    strcpy(buff, "passwordAnswer access denied");
+                    send(*socket, buff, 1 + strlen(buff), 0);
+                }
+            }
+            else //если пользователь не зарегестрирован
+            {
+                //ещё в newRequest добавить добавление пароля от ноывх пользователей в базу
+                //и в клиенте сделать обработку сообщений
+                //тут нельзя добавить, потому что оригинал отсюда недоступен
+                sendToHistoryServer(username, currentTime, buff);
+            }
+        }
+        usleep(1000);
+        memset(buff, 0, sizeof(buff)); //очистка буфера
         recv(*socket, buff, 100, MSG_PEEK);
         strcpy(currentTime, getTime());
     }
@@ -403,7 +449,7 @@ static void newRequest(int* connfd)
     {
         case 0:
             //дочерний процесс
-            connectionServer(connfd, buff);
+            connectionServer(connfd, buff, flag, index);
             printf("Connection ended with %s\n", buff);
             break;
         case -1:
@@ -425,7 +471,7 @@ int main(int argc, const char * argv[])
     sprintf(sys, "ipcrm -Q 125 && ipcrm -Q 126");
     system(sys); //удаление старых очередей сообщений
     historyFD = open(HISTORY_FILE, O_RDWR | O_CREAT, 0666); //открытие файла с правами на чтение и запись и флагом на создание, если его нет
-    ftruncate(historyFD, sizeof(s_t)); //зачистка файла с дескриптором history и вторым аргументом новый размер файла
+    ftruncate(historyFD, sizeof(s_t)); //зачистка файла с дескриптором historyFD и вторым аргументом новый размер файла
     historyVirt = mmap(NULL, sizeof(s_t), PROT_WRITE | PROT_READ, MAP_SHARED, historyFD, 0);
     
     signal( SIGCHLD, SIG_IGN ); //отсутствие зомби
